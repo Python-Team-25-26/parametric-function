@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from ParametricFunction import ParametricFunction
 
 
@@ -20,14 +20,19 @@ class FunctionStorage:
         """Загрузка функций из файла"""
         if os.path.exists(self._storage_file):
             try:
-                with open(self._storage_file, 'r') as f:
+                with open(self._storage_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 
+                loaded_count = 0
                 for func_data in data.get("functions", []):
-                    func = ParametricFunction.from_dict(func_data)
-                    self._functions[func.name] = func
+                    try:
+                        func = ParametricFunction.from_dict(func_data)
+                        self._functions[func.name] = func
+                        loaded_count += 1
+                    except Exception as e:
+                        print(f"Could not load function {func_data.get('name', 'unknown')}: {e}")
                 
-                print(f"Loaded {len(self._functions)} functions from {self._storage_file}")
+                print(f"Loaded {loaded_count} functions from {self._storage_file}")
             except Exception as e:
                 print(f"Error loading functions: {e}")
     
@@ -38,8 +43,9 @@ class FunctionStorage:
                 "functions": [func.to_dict() for func in self._functions.values()]
             }
             
-            with open(self._storage_file, 'w') as f:
-                json.dump(data, f, indent=2)
+            with open(self._storage_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                
         except Exception as e:
             print(f"Error saving functions: {e}")
     
@@ -56,21 +62,55 @@ class FunctionStorage:
         """Получение функции по имени"""
         return self._functions.get(name)
     
-    def update(self, name: str, code: str = None, description: str = None) -> Optional[ParametricFunction]:
+    def update(self, 
+               name: str, 
+               code: str = None, 
+               description: str = None,
+               input_signature: Optional[Dict[str, str]] = None,
+               output_signature: Optional[Dict[str, str]] = None,
+               parameters: Optional[List[Dict[str, Any]]] = None) -> Optional[ParametricFunction]:
         """Обновление функции"""
         func = self._functions.get(name)
         if not func:
             return None
         
+        updated = False
+        
         if code is not None:
-            func.code = code
-            func._compiled_code = compile(code, f'<function {name}>', 'exec')
+            try:
+                new_func = ParametricFunction(
+                    name=name, 
+                    code=code,
+                    description=description or func.description,
+                    input_signature=input_signature or func.input_signature,
+                    output_signature=output_signature or func.output_signature,
+                    parameters=parameters or func.parameters
+                )
+                self._functions[name] = new_func
+                updated = True
+            except Exception as e:
+                raise ValueError(f"Invalid function code: {e}")
+        else:
+            if description is not None:
+                func.description = description
+                updated = True
+            
+            if input_signature is not None:
+                func.input_signature = input_signature
+                updated = True
+            
+            if output_signature is not None:
+                func.output_signature = output_signature
+                updated = True
+            
+            if parameters is not None:
+                func.parameters = parameters
+                updated = True
         
-        if description is not None:
-            func.description = description
+        if updated:
+            self._save()
         
-        self._save()
-        return func
+        return self._functions.get(name)
     
     def delete(self, name: str) -> bool:
         """Удаление функции"""
