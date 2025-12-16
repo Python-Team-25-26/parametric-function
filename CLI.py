@@ -155,7 +155,7 @@ async def list_functions(args):
         print("-" * 60)
         
         for func in functions:
-            print(f"• {func.get('name', 'N/A')}")
+            print(f"  {func.get('name', 'N/A')}")
             print(f"  Description: {func.get('description', 'N/A')}")
             
             try:
