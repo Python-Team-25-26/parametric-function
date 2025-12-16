@@ -31,7 +31,6 @@ def run_cli(command: str, allow_fail: bool = False):
 
 
 def create_function():
-    # Используем ДРУГОЕ имя
     run_cli(
         'create '
         '--name cubic '
