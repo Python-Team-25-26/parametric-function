@@ -1,146 +1,186 @@
 import argparse
 import sys
 import json
-from FunctionStorage import storage, ParametricFunction
+import aiohttp
+import asyncio
+from typing import Dict, Optional
 
 
-def create_function(args):
+async def http_request(method: str, endpoint: str, data: Optional[Dict] = None) -> Dict:
+    """Отправка HTTP запроса к серверу"""
+    default_url = "http://localhost:8000"
+    url = f"{default_url}{endpoint}"
+    
+    async with aiohttp.ClientSession() as session:
+        try:
+            if method.upper() == "GET":
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    else:
+                        error = await response.json()
+                        raise ValueError(f"HTTP {response.status}: {error.get('detail', 'Unknown error')}")
+            
+            elif method.upper() == "POST":
+                async with session.post(url, json=data) as response:
+                    if response.status in [200, 201]:
+                        return await response.json()
+                    else:
+                        error = await response.json()
+                        raise ValueError(f"HTTP {response.status}: {error.get('detail', 'Unknown error')}")
+            
+            elif method.upper() == "PUT":
+                async with session.put(url, json=data) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    else:
+                        error = await response.json()
+                        raise ValueError(f"HTTP {response.status}: {error.get('detail', 'Unknown error')}")
+            
+            elif method.upper() == "DELETE":
+                async with session.delete(url) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    else:
+                        error = await response.json()
+                        raise ValueError(f"HTTP {response.status}: {error.get('detail', 'Unknown error')}")
+        except Exception as e:
+            raise ValueError(f"Request failed: {str(e)}")
+
+
+async def create_function(args):
     """Создать новую функцию"""
     try:
-        input_signature = None
-        output_signature = None
-        parameters = None
+        data = {
+            "name": args.name,
+            "code": args.code,
+            "description": args.description or ""
+        }
         
         if args.input_signature:
-            input_signature = json.loads(args.input_signature)
+            data["input_signature"] = json.loads(args.input_signature)
         if args.output_signature:
-            output_signature = json.loads(args.output_signature)
+            data["output_signature"] = json.loads(args.output_signature)
         if args.parameters:
-            parameters = json.loads(args.parameters)
+            data["parameters"] = json.loads(args.parameters)
         
-        func = ParametricFunction(
-            name=args.name,
-            code=args.code,
-            description=args.description or "",
-            input_signature=input_signature,
-            output_signature=output_signature,
-            parameters=parameters
-        )
+        result = await http_request("POST", "/functions", data)
+        print(f"{result.get('message', 'Function created successfully')}")
         
-        storage.create(func)
-        print(f"Function '{args.name}' created successfully")
-        
-        data = func.get_data()
-        print(f"\nFunction data:")
-        print(f"  Input signature: {data['input_signature']}")
-        print(f"  Output signature: {data['output_signature']}")
-        print(f"  Parameters: {json.dumps(data['parameters'], indent=2)}")
+        try:
+            func_info = await http_request("GET", f"/functions/{args.name}")
+            print(f"\nFunction data:")
+            print(f"  Input signature: {func_info.get('input_signature', {})}")
+            print(f"  Output signature: {func_info.get('output_signature', {})}")
+            print(f"  Parameters: {json.dumps(func_info.get('parameters', []), indent=2)}")
+        except:
+            pass
         
     except ValueError as e:
         print(f"Error: {e}")
         sys.exit(1)
 
 
-def get_function(args):
+async def get_function(args):
     """Получить информацию о функции"""
-    func = storage.get(args.name)
-    if not func:
-        print(f"Function '{args.name}' not found")
-        sys.exit(1)
-    
-    if args.data:
-        data = func.get_data()
-        print(json.dumps(data, indent=2))
-    else:
-        print(f"Name: {func.name}")
-        print(f"Description: {func.description}")
-        print(f"Code:\n{func.code}")
+    try:
+        func_info = await http_request("GET", f"/functions/{args.name}")
         
-        if not args.brief:
-            data = func.get_data()
-            print(f"\nInput signature: {data['input_signature']}")
-            print(f"Output signature: {data['output_signature']}")
-            print(f"Parameters: {json.dumps(data['parameters'], indent=2)}")
+        if args.data:
+            print(json.dumps(func_info, indent=2))
+        else:
+            print(f"Name: {func_info.get('name', 'N/A')}")
+            print(f"Description: {func_info.get('description', 'N/A')}")
+            print(f"Code:\n{func_info.get('code', 'N/A')}")
+            
+            if not args.brief:
+                print(f"\nInput signature: {func_info.get('input_signature', {})}")
+                print(f"Output signature: {func_info.get('output_signature', {})}")
+                print(f"Parameters: {json.dumps(func_info.get('parameters', []), indent=2)}")
+    
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
 
 
-def update_function(args):
+async def update_function(args):
     """Обновить функцию"""
-    input_signature = None
-    output_signature = None
-    parameters = None
+    try:
+        data = {}
+        
+        if args.code is not None:
+            data["code"] = args.code
+        if args.description is not None:
+            data["description"] = args.description
+        if args.input_signature:
+            data["input_signature"] = json.loads(args.input_signature)
+        if args.output_signature:
+            data["output_signature"] = json.loads(args.output_signature)
+        if args.parameters:
+            data["parameters"] = json.loads(args.parameters)
+        
+        if not data:
+            print("Nothing to update. Provide at least one field to update.")
+            return
+        
+        result = await http_request("PUT", f"/functions/{args.name}", data)
+        print(f"{result.get('message', 'Function updated successfully')}")
     
-    if args.input_signature:
-        try:
-            input_signature = json.loads(args.input_signature)
-        except json.JSONDecodeError as e:
-            print(f"Invalid input_signature JSON: {e}")
-            sys.exit(1)
-    
-    if args.output_signature:
-        try:
-            output_signature = json.loads(args.output_signature)
-        except json.JSONDecodeError as e:
-            print(f"Invalid output_signature JSON: {e}")
-            sys.exit(1)
-    
-    if args.parameters:
-        try:
-            parameters = json.loads(args.parameters)
-        except json.JSONDecodeError as e:
-            print(f"Invalid parameters JSON: {e}")
-            sys.exit(1)
-    
-    updated = storage.update(
-        name=args.name,
-        code=args.code,
-        description=args.description,
-        input_signature=input_signature,
-        output_signature=output_signature,
-        parameters=parameters
-    )
-    
-    if updated:
-        print(f"Function '{args.name}' updated successfully")
-    else:
-        print(f"Function '{args.name}' not found")
+    except ValueError as e:
+        print(f"Error: {e}")
         sys.exit(1)
 
 
-def delete_function(args):
+async def delete_function(args):
     """Удалить функцию"""
-    if storage.delete(args.name):
-        print(f"Function '{args.name}' deleted successfully")
-    else:
-        print(f"Function '{args.name}' not found")
+    try:
+        result = await http_request("DELETE", f"/functions/{args.name}")
+        print(f"{result.get('message', 'Function deleted successfully')}")
+    
+    except ValueError as e:
+        print(f"Error: {e}")
         sys.exit(1)
 
 
-def list_functions(args):
+async def list_functions(args):
     """Показать список всех функций"""
-    functions = storage.list()
-    if not functions:
-        print("No functions found")
-        return
+    try:
+        functions = await http_request("GET", "/functions")
+        
+        if not functions:
+            print("No functions found")
+            return
+        
+        print(f"Found {len(functions)} functions:")
+        print("-" * 60)
+        
+        for func in functions:
+            print(f"• {func.get('name', 'N/A')}")
+            print(f"  Description: {func.get('description', 'N/A')}")
+            
+            try:
+                func_detail = await http_request("GET", f"/functions/{func.get('name')}")
+                print(f"  Input: {func_detail.get('input_signature', {})}")
+                print(f"  Output: {func_detail.get('output_signature', {})}")
+                params = func_detail.get('parameters', [])
+                print(f"  Parameters: {len(params)}")
+            except:
+                print(f"  [Could not fetch details]")
+            
+            print()
     
-    print(f"Found {len(functions)} functions:")
-    print("-" * 60)
-    for func in functions:
-        data = func.get_data()
-        print(f"• {func.name}")
-        print(f"  Description: {func.description}")
-        print(f"  Input: {data['input_signature']}")
-        print(f"  Output: {data['output_signature']}")
-        print(f"  Parameters: {len(data['parameters'])}")
-        print()
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
 
 
-def compute_function(args):
+async def compute_function(args):
     """Вычислить функцию"""
     try:
         if args.x:
             x_values = [float(val) for val in args.x.split(",")]
         else:
-            x_values = [float(i) for i in range(10)]  # По умолчанию 0-9
+            x_values = [float(i) for i in range(10)]
         
         params = {}
         if args.params:
@@ -149,15 +189,20 @@ def compute_function(args):
                     key, value = param.split("=", 1)
                     params[key.strip()] = float(value)
         
-        results = storage.compute(args.name, x_values, params)
+        data = {
+            "x": x_values,
+            "params": params
+        }
+        
+        results = await http_request("POST", f"/functions/{args.name}/compute", data)
         
         print(f"Results for function '{args.name}':")
         for x_val, y_val in zip(x_values, results):
             print(f"  f({x_val}) = {y_val}")
-            
+        
         if args.output and len(results) == 1:
             print(f"\nOutput: {results[0]}")
-            
+    
     except ValueError as e:
         print(f"Error: {e}")
         sys.exit(1)
@@ -166,7 +211,18 @@ def compute_function(args):
         sys.exit(1)
 
 
-def main():
+async def get_data(args):
+    """Получить данные функции"""
+    try:
+        data = await http_request("GET", f"/functions/{args.name}/data")
+        print(json.dumps(data, indent=2))
+    
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+
+async def main():
     parser = argparse.ArgumentParser(
         description="CLI for Parametric Function Management System",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -186,6 +242,9 @@ Examples:
   
   # Получить информацию о функции
   python CLI.py get --name "linear" --data
+  
+  # Получить данные функции
+  python CLI.py data --name "linear"
   
   # Список всех функций
   python CLI.py list
@@ -226,6 +285,9 @@ Examples:
     compute_parser.add_argument("--params", nargs="*", help="Parameters as key=value pairs")
     compute_parser.add_argument("--output", action="store_true", help="Output single result only")
     
+    data_parser = subparsers.add_parser("data", help="Get function data")
+    data_parser.add_argument("--name", required=True, help="Function name")
+    
     args = parser.parse_args()
     
     if not args.command:
@@ -238,10 +300,12 @@ Examples:
         "update": update_function,
         "delete": delete_function,
         "list": list_functions,
-        "compute": compute_function
+        "compute": compute_function,
+        "data": get_data
     }
     
-    command_handlers[args.command](args)
+    await command_handlers[args.command](args)
+
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
